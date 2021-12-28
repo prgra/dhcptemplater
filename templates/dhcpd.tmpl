@@ -1,0 +1,21 @@
+default-lease-time 86400;
+max-lease-time 172800;
+ddns-update-style none;
+one-lease-per-client true;
+deny duplicates;
+
+log-facility local7;
+shared-network {{ .NetName}} { 
+{{range .Nets}}
+  subnet {{ .Net }} netmask {{ .Mask }} {
+    option domain-name-servers {{ range $index, $element := .DNSes }}{{if $index}}, {{end}}{{ $element }}{{ end }};
+    option routers {{ .GateWay }};
+  } {{end}}
+}
+
+#List of hosts
+{{range .Hosts}}
+Host {{ .Name }} {
+  hardware ethernet {{ .Mac }};
+  fixed-address {{ .IP }};
+}{{end}}
