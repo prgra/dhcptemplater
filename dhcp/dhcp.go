@@ -1,15 +1,18 @@
 package dhcp
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"text/template"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 )
 
 type Cfg struct {
-	DBURL        string `toml:"mysql"`
-	TemplatePath string `toml:"templates"`
+	DBURL   string `toml:"mysql"`
+	NetName string `toml:"netname"`
 }
 
 type App struct {
@@ -17,10 +20,10 @@ type App struct {
 	Cfg Cfg
 }
 
-func NewApp(c Cfg) *App {
-	return &App{
-		Cfg: c,
-	}
+func NewApp(c Cfg) (a App, err error) {
+	a.Cfg = c
+	a.DB, err = sqlx.Open("mysql", c.DBURL)
+	return a, err
 }
 
 type DHCP struct {
@@ -42,39 +45,47 @@ type Host struct {
 	Mac  string
 }
 
-func (a *App) GetTemplates() {
+type dbent struct {
+	ID  int    `db:"id"`
+	IP  int64  `db:"ip"`
+	Mac string `db:"mac"`
+}
+
+func (a *App) GetDHCP() (dta []byte, err error) {
 	t, err := template.ParseFiles("templates/dhcpd.tmpl")
 	if err != nil {
-		panic(err)
+		return []byte(""), err
+	}
+	var hosts []dbent
+	err = a.DB.Select(&hosts, "select id, ip, mac from ip_groups where mac != ''")
+	if err != nil {
+		return []byte(""), err
 	}
 	hs := DHCP{
-		NetName: "HelloWorld",
-		Nets: []Net{
-			{
-				Net:     "127.0.0.1",
-				Mask:    "255.255.255.0",
-				DNSes:   []string{"8.8.8.8", "5.5.5.5"},
-				GateWay: "127.0.0.2",
-			},
-			{
-				Net:     "127.0.0.2",
-				Mask:    "255.255.255.0",
-				DNSes:   []string{"8.8.8.8", "5.5.5.5"},
-				GateWay: "127.0.0.2",
-			},
-		},
-		Hosts: []Host{
-			{
-				Name: "asda",
-				IP:   "127.0.0.1",
-				Mac:  "hhbb",
-			},
-			{
-				Name: "asdaaa",
-				IP:   "127.0.0.2",
-				Mac:  "hhcc",
-			},
-		},
+		NetName: a.Cfg.NetName,
+	}
+	for i := range hosts {
+		// mysql inet_ntoa don't work
+		sip := inet_ntoa(uint32(hosts[i].IP))
+		ip := net.ParseIP(sip)
+		if !ip.IsGlobalUnicast() {
+			continue
+		}
+		mac, err := net.ParseMAC(hosts[i].Mac)
+		if err != nil {
+			continue
+		}
+		hs.Hosts = append(hs.Hosts,
+			Host{
+				IP:   ip.String(),
+				Mac:  mac.String(),
+				Name: fmt.Sprintf("id_%d", hosts[i].ID),
+			})
 	}
 	t.Execute(os.Stdout, hs)
+	return
+}
+
+func inet_ntoa(ip uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d", byte(ip>>24), byte(ip>>16), byte(ip>>8), byte(ip))
 }

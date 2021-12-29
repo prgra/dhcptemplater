@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 
@@ -16,7 +15,12 @@ func main() {
 		log.Println("can't read config", err)
 		os.Exit(1)
 	}
-	fmt.Println(conf)
-	app := dhcp.NewApp(dhcp.Cfg{})
-	app.GetTemplates()
+	app, err := dhcp.NewApp(conf)
+	if err != nil {
+		panic(err)
+	}
+	_, err = app.GetDHCP()
+	if err != nil {
+		panic(err)
+	}
 }
