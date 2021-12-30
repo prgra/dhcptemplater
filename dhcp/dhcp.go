@@ -51,19 +51,51 @@ type dbent struct {
 	Mac string `db:"mac"`
 }
 
+type dbnet struct {
+	IPID    int    `db:"ip_zone_id"`
+	Name    string `db:"name"`
+	Net     int64  `db:"net"`
+	Mask    int64  `db:"mask"`
+	GateWay int64  `db:"gateway"`
+}
+
 func (a *App) GetDHCP() (dta []byte, err error) {
 	t, err := template.ParseFiles("templates/dhcpd.tmpl")
-	if err != nil {
-		return []byte(""), err
-	}
-	var hosts []dbent
-	err = a.DB.Select(&hosts, "select id, ip, mac from ip_groups where mac != ''")
 	if err != nil {
 		return []byte(""), err
 	}
 	hs := DHCP{
 		NetName: a.Cfg.NetName,
 	}
+	var nets []dbnet
+	err = a.DB.Select(&nets, "select ip_zone_id, z.name, net, mask, gateway from ip_zones z join ip_zones_detail zd on zd.id = z.id")
+	if err != nil {
+		return []byte(""), err
+	}
+	// var gwmap map[string]string
+	for i := range nets {
+		nt := net.ParseIP(inet_ntoa(uint32(nets[i].Net)))
+		if !nt.IsGlobalUnicast() {
+			continue
+		}
+		gw := net.ParseIP(inet_ntoa(uint32(nets[i].GateWay)))
+		if !gw.IsGlobalUnicast() {
+			continue
+		}
+		hs.Nets = append(hs.Nets, Net{
+			Net:     nt.String(),
+			Mask:    inet_ntoa(uint32(nets[i].Mask)),
+			GateWay: gw.String(),
+			DNSes:   []string{"1.1.1.1", "8.8.8.8"},
+		})
+	}
+
+	var hosts []dbent
+	err = a.DB.Select(&hosts, "select id, ip, mac from ip_groups where mac != ''")
+	if err != nil {
+		return []byte(""), err
+	}
+
 	for i := range hosts {
 		// mysql inet_ntoa don't work
 		sip := inet_ntoa(uint32(hosts[i].IP))
@@ -82,6 +114,7 @@ func (a *App) GetDHCP() (dta []byte, err error) {
 				Name: fmt.Sprintf("id_%d", hosts[i].ID),
 			})
 	}
+
 	t.Execute(os.Stdout, hs)
 	return
 }
